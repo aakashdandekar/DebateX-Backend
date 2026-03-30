@@ -2,6 +2,7 @@ services:
   - type: web
     name: debatex-backend
     env: python
+    pythonVersion: "3.13.2"
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn src.app:app --host 0.0.0.0 --port ${PORT:-8000}
     envVars:
