@@ -16,7 +16,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["https://debate-x-frontend.vercel.app/"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,7 +26,7 @@ app.mount("/static", StaticFiles(directory="static", html=True, check_dir=False)
 
 @app.get("/")
 async def serve_frontend(request: Request):
-    return RedirectResponse(url="http://localhost:5173")
+    return RedirectResponse(url="https://debate-x-frontend.vercel.app/")
 
 @app.post('/register')
 async def register_user(user: User, request: Request):
