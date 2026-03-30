@@ -1,14 +1,16 @@
 import traceback
+from langchain_core.tracers import context
+import traceback
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Form, Query, Request
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from bson import ObjectId
 from src.database.db import database
-from src.models.schemas import User, Login, Context_history
+from src.models.schemas import User, Login
 from src.core.auth import hash, check_hash, get_current_user, create_access_token
-from src.services.ai import modelResponse, judge_debate, find_topic
+from src.services.ai import modelResponse, judge_debate, find_topic, modelConversationSimulation_for, modelConversationSimulation_against, judge_debate_model
 
 app = FastAPI(
     servers=[{"url": "http://localhost:8000"}]
@@ -16,7 +18,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://debate-x-frontend.vercel.app/"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,7 +28,7 @@ app.mount("/static", StaticFiles(directory="static", html=True, check_dir=False)
 
 @app.get("/")
 async def serve_frontend(request: Request):
-    return RedirectResponse(url="https://debate-x-frontend.vercel.app/")
+    return RedirectResponse(url="http://localhost:5173")
 
 @app.post('/register')
 async def register_user(user: User, request: Request):
@@ -93,7 +95,8 @@ async def login_user(login: Login):
 async def get_topic():
     return await find_topic()
 
-@app.post('/system/start-debate')
+#User VS AI
+@app.patch('/system/start-debate')
 async def start_system_debate(topic: str, role: str, current_user: str = Depends(get_current_user)):
     try:
         context_history_collection = database["context_history"]
@@ -125,7 +128,7 @@ async def start_system_debate(topic: str, role: str, current_user: str = Depends
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-@app.get('/system/debate/system-response')
+@app.patch('/system/debate/system-response')
 async def system_response(user_response: str, current_user: str = Depends(get_current_user)):
     try:
         response = await modelResponse(argument=user_response, user_id=current_user)
@@ -153,13 +156,12 @@ async def system_response(user_response: str, current_user: str = Depends(get_cu
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-@app.get("/system/end-debate")
+@app.delete("/system/end-debate")
 async def end_system_debate(current_user: str = Depends(get_current_user)):
     try:
         user_collection = database["user"]
         context_history_collection = database["context_history"]
 
-        user = await user_collection.find_one({"_id": ObjectId(current_user)})
         verdict = await judge_debate(current_user)
 
         if verdict.get("winner", "") == "user":
@@ -187,6 +189,94 @@ async def end_system_debate(current_user: str = Depends(get_current_user)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+#AI VS AI
+@app.post('/system/spectator-mode/start')
+async def spectator_mode(
+    topic: str,
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        collection = database['spectator-mode']
+        result = await collection.insert_one({
+            "user_id": current_user,
+            "topic": topic,
+            "context": ""
+        })
+
+        return {
+            "message": f"Spectator Mode initiated, {result.inserted_id}"
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(f"Error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@app.patch('/system/spectator-mode/debate')
+async def debate_ai(limit:int = 20, current_user: str = Depends(get_current_user)):
+    try:
+        collection = database['spectator-mode']
+        chat = await collection.find_one({"user_id": current_user})
+
+        topic = chat.get("topic", "")
+        context = chat.get("context", "")
+        
+        if limit % 2 == 0:
+            response = await modelConversationSimulation_for(
+                context=context,
+                topic=topic,
+                argument="Based on context and topic argue in favor for the topic"
+            )
+            context += f"\nModel1: {response}"
+        
+        else:
+            response = await modelConversationSimulation_against(
+                context=context,
+                topic=topic,
+                argument="Based on context and topic argue in favor against the topic"
+            )
+            context += f"\nModel2: {response}"
+        
+        await collection.update_one(
+            {"user_id": current_user},
+            {"$set": {"context": context}}
+        )
+
+        if limit == 0:
+            return {"response": response}
+
+        return {"response": response, "limit_left": limit - 1}
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(f"Error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@app.delete('/system/spectator-mode/end')
+async def end_ai_debate(current_user: str = Depends(get_current_user)):
+    try:
+        judgement = await judge_debate_model(user_id=current_user)
+        
+        collection = database['spectator-mode']
+        await collection.delete_one({"user_id": current_user})
+
+        return {"response": judgement}
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(f"Error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+#Leaderboard
 @app.get('/api/leader-board')
 async def get_leaderboard(current_user: User = Depends(get_current_user)):
     try:

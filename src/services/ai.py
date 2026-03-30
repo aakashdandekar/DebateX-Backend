@@ -42,6 +42,7 @@ async def find_topic():
     prompt = PromptTemplate(
         template="""
             Generate one debate topic and describe it in exactly one line.
+            The topic should be unique and new.
             Output plain text only.
             Do not include any formatting, explanations, or reasoning.
             The output should contain only the topic followed by a brief one-line description.
@@ -62,22 +63,24 @@ async def modelConversationSimulation_for(topic: str, context: str, argument: st
         )
 
         retriever = vectorstore.as_retriever(
-            search_type=docs,
             search_kwargs={'k': 5}
         )
 
-        retrieved_docs = retriever.invoke(response)
+        retrieved_docs = retriever.invoke(argument)
         context_summary = '\n\n'.join([d.page_content for d in retrieved_docs])
 
         vectorstore.delete_collection()
     else:
         context_summary = ""
 
-        template = """
+    template = """
         Topic: {topic}
         Your Role: For
+        Use new and unique vocab but simple language.
+        Your language should be formal.
         You are a professional debater. Your job is to argue AGAINST whatever the user says.
         No matter what they claim, challenge it with strong counter-arguments.
+        Make sure you do not repeat arguments.
         Be direct, logical, and confident. Keep it to 3-4 sentences.
 
         Context for debate is {context_summary}
@@ -108,22 +111,24 @@ async def modelConversationSimulation_against(topic: str, context: str, argument
         )
 
         retriever = vectorstore.as_retriever(
-            search_type=docs,
             search_kwargs={'k': 5}
         )
 
-        retrieved_docs = retriever.invoke(response)
+        retrieved_docs = retriever.invoke(argument)
         context_summary = '\n\n'.join([d.page_content for d in retrieved_docs])
 
         vectorstore.delete_collection()
     else:
         context_summary = ""
 
-        template = """
+    template = """
         Topic: {topic}
         Your Role: Against
+        Use new and unique vocab but simple language.
+        Your language should be formal.
         You are a professional debater. Your job is to argue AGAINST whatever the user says.
         No matter what they claim, challenge it with strong counter-arguments.
+        Make sure you do not repeat arguments.
         Be direct, logical, and confident. Keep it to 3-4 sentences.
 
         Context for debate is {context_summary}
@@ -144,6 +149,75 @@ async def modelConversationSimulation_against(topic: str, context: str, argument
     context += f"\nModel 2: {response}"
 
     return response
+
+async def judge_debate_model(user_id: str) -> str:
+    context_collection = database["spectator-mode"]
+    result = await context_collection.find_one({"user_id": user_id})
+
+    if not result:
+        raise ValueError(f"No debate session found for user_id: {user_id}")
+
+    topic = result.get("topic", "")
+    context = result.get("context", "")
+
+    template = """
+        You are a strict debate judge with years of experience.
+        You will be given a debate conversation between an AI and an AI debater.
+        
+        Evaluate both sides based on:
+        1. Logic & Reasoning - How well-structured are the arguments?
+        2. Evidence & Facts - Are claims backed up?
+        3. Persuasiveness - How convincing is each side?
+        4. Clarity - How clear and concise are the points?
+
+        Topic of Debate:
+        {topic}
+
+        Context:
+        {context}
+
+        Respond ONLY in this exact JSON format:
+        {{
+            "winner": "user" or "system",
+            "user_score": <score out of 10>,
+            "user_feedback": "<what the user did well and poorly>",
+            "reasoning": "<2-3 sentences explaining why the winner won>"
+        }}
+    """
+
+    prompt = PromptTemplate(
+        template=template,
+        input_variables=['topic', 'context']
+    )
+
+    vectorstore = None
+
+    docs = splitter.create_documents([context]) if context else []
+    if docs:
+        vectorstore = Chroma.from_documents(
+            documents=docs,
+            embedding=embedding_model
+        )
+
+        retriever = vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 5}
+        )
+        retrieved_docs = retriever.invoke(topic)
+
+        context = "\n\n".join([d.page_content for d in retrieved_docs])
+    else:
+        context = ""
+
+    chain = prompt | groq_openai_gpt_llm | StrOutputParser()
+
+    response = await chain.ainvoke({"topic": topic, "context": context})
+    response = re.sub(r"```json|```", "", response).strip()
+
+    if vectorstore is not None:
+        vectorstore.delete_collection()
+
+    return json.loads(response)
 
 
 #Competative Mode: User vs AI
@@ -201,7 +275,6 @@ async def modelResponse(argument: str, user_id: str) -> str:
 
     return response
 
-#Judgement System
 async def judge_debate(user_id: str):
     context_collection = database["context_history"]
     result = await context_collection.find_one({"user_id": user_id})
