@@ -5,10 +5,10 @@ from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from bson import ObjectId
-from Backend.src.database.db import database
-from Backend.src.models.schemas import User, Login, Context_history
-from Backend.src.core.auth import hash, check_hash, get_current_user, create_access_token
-from Backend.src.services.ai import modelResponse, judge_debate, find_topic
+from src.database.db import database
+from src.models.schemas import User, Login, Context_history
+from src.core.auth import hash, check_hash, get_current_user, create_access_token
+from src.services.ai import modelResponse, judge_debate, find_topic
 
 app = FastAPI(
     servers=[{"url": "http://localhost:8000"}]
