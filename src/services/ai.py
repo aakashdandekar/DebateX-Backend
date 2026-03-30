@@ -6,7 +6,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_groq import ChatGroq
-from Backend.database.db import database
+from src.database.db import database
 from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
 
