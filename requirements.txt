@@ -22,7 +22,6 @@ sentence-transformers==2.7.0
 faiss-cpu
 python-multipart
 python-docx
-asyncio
 PyPDF2
 langchain_groq
 langchain_community
